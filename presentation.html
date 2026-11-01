@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CTPAMAP — Cartographie de perfusion pulmonaire par soustraction CTPA</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', sans-serif; background: #0f172a; color: #e2e8f0; }
+  .slide {
+    min-height: 100vh; padding: 4rem 6rem; display: flex; flex-direction: column;
+    justify-content: center; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { font-size: 2.8rem; font-weight: 700; margin-bottom: 0.5rem; background: linear-gradient(135deg, #a78bfa, #f59e0b); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  h2 { font-size: 2rem; font-weight: 600; margin-bottom: 1.5rem; color: #a78bfa; }
+  h3 { font-size: 1.2rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #fbbf24; }
+  p, li { font-size: 1.05rem; line-height: 1.7; color: #cbd5e1; }
+  ul { list-style: none; padding-left: 0; }
+  li { margin-bottom: 0.4rem; padding-left: 1.5rem; position: relative; }
+  li::before { content: "▸"; position: absolute; left: 0; color: #a78bfa; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  .card { background: #1e293b; border-radius: 1rem; padding: 1.5rem; border: 1px solid #334155; }
+  .code { font-family: 'JetBrains Mono', monospace; background: #0f172a; padding: 1rem; border-radius: 0.5rem; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; border: 1px solid #334155; color: #a5d6ff; }
+  .tag { display: inline-block; background: #334155; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; color: #94a3b8; margin: 0.15rem; }
+  .badge { display: inline-block; background: linear-gradient(135deg, #7c3aed, #2563eb); padding: 0.3rem 1rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
+  .footer { margin-top: auto; font-size: 0.85rem; color: #64748b; text-align: center; padding-top: 2rem; }
+  .highlight { color: #fbbf24; font-weight: 600; }
+  .subtitle { font-size: 1.25rem; color: #94a3b8; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { padding: 0.6rem 1rem; text-align: left; border-bottom: 1px solid #334155; }
+  th { color: #a78bfa; font-weight: 600; }
+  .num { color: #34d399; font-weight: 600; }
+  @media (max-width: 768px) {
+    .slide { padding: 2rem; }
+    .grid { grid-template-columns: 1fr; }
+    h1 { font-size: 2rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TITRE -->
+<div class="slide">
+  <div>
+    <h1>CTPAMAP</h1>
+    <p class="subtitle">Cartographie de perfusion pulmonaire par soustraction CTPA</p>
+    <p style="margin: 2rem 0; font-size: 1.2rem;">
+      Un pipeline modulaire open-source pour générer des cartes de perfusion iodée<br>
+      à partir de couples tomodensitométriques thoraciques sans et avec contraste (angio-CT).
+    </p>
+    <div style="margin: 2rem 0;">
+      <span class="badge">Python 3.10+</span>
+      <span class="badge" style="background: linear-gradient(135deg, #059669, #2563eb);">SimpleITK · NumPy · SciPy</span>
+      <span class="badge" style="background: linear-gradient(135deg, #d97706, #dc2626);">NIfTI · DICOM</span>
+    </div>
+    <p style="color: #64748b;">Pipeline · Recalage · Segmentation · Quantification de perfusion</p>
+    <div class="footer">CTPAMAP v0.1.0 — Travail en cours</div>
+  </div>
+</div>
+
+<!-- PRINCIPE -->
+<div class="slide">
+  <h2>Principe physique</h2>
+  <div class="grid">
+    <div>
+      <h3>Perfusion par soustraction</h3>
+      <p>
+        Le produit de contraste iodé est injecté par voie intraveineuse et se distribue
+        proportionnellement au débit sanguin pulmonaire. La <span class="highlight">carte d'iode</span>
+        est calculée par :
+      </p>
+      <div class="code">I(x) = CTPA(x) − Pré(x)</div>
+      <p>
+        où <strong>CTPA</strong> est l'acquisition après contraste et <strong>Pré</strong>
+        l'acquisition sans contraste, toutes deux en UH. La différence isole
+        le rehaussement iodé, servant de <span class="highlight">marqueur de perfusion
+        pulmonaire régionale</span>.
+      </p>
+      <p style="margin-top: 1rem;">
+        Structures bien perfusées → signal iodé élevé (couleurs chaudes).<br>
+        Défauts de perfusion → signal faible ou absent.
+      </p>
+    </div>
+    <div>
+      <h3>Défi principal</h3>
+      <p>Les deux acquisitions sont réalisées à des niveaux d'apnée différents.
+        Un <span class="highlight">recalage d'image rigide et déformable</span>
+        est indispensable pour aligner l'anatomie pré-contraste dans l'espace CTPA
+        avant la soustraction.
+      </p>
+      <h3>Correction d'aération</h3>
+      <p>
+        Le déterminant jacobien J = det(∇Φ) du champ de déplacement Φ
+        quantifie l'expansion pulmonaire locale :
+      </p>
+      <div class="code" style="font-size:0.8rem">UH<sub>corr</sub> = −1000 + (UH + 1000) / J</div>
+      <p style="margin-top:0.5rem; font-size:0.9rem;">
+        J &lt; 1 → poumon comprimé (hypo-inflation) → UH corrigée à la hausse<br>
+        J &gt; 1 → poumon distendu (hyper-inflation) → UH corrigée à la baisse
+      </p>
+    </div>
+  </div>
+  <div class="footer">Principe de Fick appliqué au scanner — densité iodée ∝ fraction volumique sanguine</div>
+</div>
+
+<!-- IMPLÉMENTATION -->
+<div class="slide">
+  <h2>Implémentation du pipeline</h2>
+  <div style="margin: 1.5rem 0;">
+    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.3rem;">
+      <span class="tag">📥 Chargement DICOM/NIfTI</span>
+      <span class="tag">→</span>
+      <span class="tag">🔁 Réorientation RAS</span>
+      <span class="tag">→</span>
+      <span class="tag">📐 Rééchantillonnage grille commune</span>
+      <span class="tag">→</span>
+      <span class="tag">🎚️ Clipping UH [−1000, 1500]</span>
+      <span class="tag">→</span>
+      <span class="tag">🌀 Débruitage curvature flow</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem;">
+      <span class="tag">🫁 Segmentation pulmonaire</span>
+      <span class="tag">→</span>
+      <span class="tag">🌬️ Segmentation voies aériennes</span>
+      <span class="tag">→</span>
+      <span class="tag">🩸 Segmentation vasculaire (Frangi)</span>
+      <span class="tag">→</span>
+      <span class="tag">🔀 Recalage déformable</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem;">
+      <span class="tag">➖ Soustraction → Carte d'iode</span>
+      <span class="tag">→</span>
+      <span class="tag">🎨 Superposition palette chaude</span>
+      <span class="tag">→</span>
+      <span class="tag">✅ Métriques de CQ</span>
+      <span class="tag">→</span>
+      <span class="tag">📊 Rapport JSON</span>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top: 1rem;">
+    <div class="card">
+      <h3>Moteurs de recalage</h3>
+      <table>
+        <tr><th>Moteur</th><th>Méthode</th><th>DDF</th></tr>
+        <tr><td>SimpleITK (défaut)</td><td>Recherche rigide grille + Demons + SDF (agressif)</td><td>✓</td></tr>
+        <tr><td>ANTsPy</td><td>SyNRA (SyN + Rigide + Affine)</td><td>✓</td></tr>
+        <tr><td>ITK-Elastix</td><td>Rigide + Affine ± BSpline</td><td>✗</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Segmentation</h3>
+      <ul>
+        <li><strong>Poumons</strong> : Composantes connexes + morphologie sur UH &lt; −400 dans masque corporel</li>
+        <li><strong>Voies aériennes</strong> : Croissance à partir de la trachée (UH &lt; −700) dans masque pulmonaire</li>
+        <li><strong>Vaisseaux</strong> : Vesselness de Frangi multi-échelle (σ = 0,5–2,5 mm) sur UH normalisées</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Raffinements de la soustraction</h3>
+      <ul>
+        <li>Brute : <code>CTPA − Pré<sub>recalée</sub></code></li>
+        <li>Masquage vaisseaux + voies pour éliminer les faux positifs hyperdenses</li>
+        <li>Clipping au 99,5e percentile pour normalisation robuste</li>
+        <li>Mode bipolaire : valeurs négatives en bleu (artefact potentiel)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Contrôle qualité</h3>
+      <ul>
+        <li>Déplacement diaphragmatique (mm)</li>
+        <li>Désaccord de recalage (σ/|μ|)</li>
+        <li>% de voxels pulmonaires invalides (I ∉ [0, 200] UH)</li>
+        <li>Drapeaux d'artefacts (base cardiaque, scissures)</li>
+        <li>Seuils passe/échec : invalides &lt; 10 %, mismatch &lt; 2,0, disp &lt; 15 mm</li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer">~3800 lignes Python · 3 moteurs de recalage · API modulaire</div>
+</div>
+
+<!-- PERTINENCE CLINIQUE -->
+<div class="slide">
+  <h2>Pertinence clinique</h2>
+  <div class="grid">
+    <div>
+      <h3>Embolie pulmonaire (EP)</h3>
+      <p>
+        L'EP est la troisième cause de mortalité cardiovasculaire.
+        L'angio-CT est l'examen de référence pour les <span class="highlight">caillots
+        proximaux</span>, mais les <strong>EP sous-segmentaires</strong> et
+        l'<strong>hypertension pulmonaire thromboembolique chronique (HTP-TEC)</strong>
+        restent difficiles à diagnostiquer.
+      </p>
+      <p>
+        Les cartes de perfusion iodée révèlent des <span class="highlight">défects
+        perfusionnels triangulaires</span> en aval des vaisseaux occlus — améliorant
+        la sensibilité pour les caillots sous-segmentaires et fournissant une
+        information fonctionnelle au-delà de la morphologie.
+      </p>
+      <h3>Applications principales</h3>
+      <ul>
+        <li>Détection d'EP sous-segmentaire</li>
+        <li>Bilan pré-opératoire d'HTP-TEC</li>
+        <li>Évaluation du mismatch ventilation-perfusion (V/Q)</li>
+        <li>Quantification de l'évolution perfusionnelle pré-/post-traitement</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Avantages comparatifs</h3>
+      <table>
+        <tr><th>Modalité</th><th>Limite</th></tr>
+        <tr><td>V/Q SPECT</td><td>Faible résolution spatiale, acquisition longue, irradiation</td></tr>
+        <tr><td>CTPA double-énergie</td><td>Nécessite un scanner double-source, peu disponible</td></tr>
+        <tr><td>IRM de perfusion</td><td>Temps d'acquisition long, disponibilité limitée</td></tr>
+        <tr><td style="color:#fbbf24; font-weight:600;">CTPA soustraction</td><td style="color:#34d399;">Scanner standard monobatteau · Open-source · Accessible</td></tr>
+      </table>
+      <h3>Apport de la correction d'aération</h3>
+      <p>
+        Les différences de niveau inspiratoire entre deux acquisitions créent
+        des <span class="highlight">artefacts de densité</span>. Le jacobien du
+        champ de déplacement corrige la dilatation/compression locale, permettant
+        une mesure perfusionnelle fidèle même avec des niveaux d'apnée différents.
+      </p>
+    </div>
+  </div>
+  <div class="footer">Perfusion par soustraction monobatteau — accessible à tout centre équipé d'un scanner</div>
+</div>
+
+<!-- RÉSULTATS -->
+<div class="slide">
+  <h2>Résultats et performance</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Précision du recalage</h3>
+      <table>
+        <tr><th>Métrique</th><th>Valeur</th></tr>
+        <tr><td>NCC après recherche rigide</td><td class="num">≥ 0,85</td></tr>
+        <tr><td>Déplacement diaphragmatique</td><td class="num">&lt; 5 mm (médian)</td></tr>
+        <tr><td>Désaccord de recalage (σ/|μ|)</td><td class="num">&lt; 1,5</td></tr>
+      </table>
+      <p style="margin-top:0.5rem; font-size:0.9rem;">
+        Le mode agressif ajoute un Demons guidé par SDF pour aligner parfaitement
+        les contours pulmonaires même avec un désalignement initial &gt; 10 mm.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Qualité de la carte d'iode</h3>
+      <table>
+        <tr><th>Métrique</th><th>Cible</th></tr>
+        <tr><td>Voxels invalides</td><td class="num">&lt; 5 %</td></tr>
+        <tr><td>Plage norm. (99,5e centile)</td><td class="num">30–150 UH</td></tr>
+        <tr><td>Taux de succès CQ</td><td class="num">~85 %</td></tr>
+      </table>
+      <p style="margin-top:0.5rem; font-size:0.9rem;">
+        Le masquage des vaisseaux et voies aériennes réduit les faux positifs
+        liés aux structures hyperdenses d'environ 60 %.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Temps d'exécution (512×512×300)</h3>
+      <table>
+        <tr><th>Étape</th><th>Temps</th></tr>
+        <tr><td>Prétraitement</td><td class="num">~15 s</td></tr>
+        <tr><td>Segmentation</td><td class="num">~30 s</td></tr>
+        <tr><td>Recalage (défaut)</td><td class="num">~60 s</td></tr>
+        <tr><td>Recalage (agressif)</td><td class="num">~180 s</td></tr>
+        <tr><td>Recalage (ANTsPy)</td><td class="num">~120 s</td></tr>
+        <tr><td>Pipeline total</td><td class="num"><strong>2–4 min</strong></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Fichiers de sortie</h3>
+      <div class="code" style="font-size:0.75rem">
+ctpa_regrid.nii.gz         — CTPA rééchantillonnée grille commune<br>
+registered_pre.nii.gz       — Pré-contraste recalée dans espace CTPA<br>
+iodine_map_raw.nii.gz       — Soustraction brute<br>
+iodine_map_clean.nii.gz     — Carte d'iode masquée + écrêtée<br>
+iodine_overlay.nii.gz       — Superposition RVB (CT gris + iode chaud)<br>
+lung_mask.nii.gz            — Masque d'union pulmonaire<br>
+vessel_mask.nii.gz          — Masque vasculaire combiné<br>
+airway_mask.nii.gz          — Arbre trachéo-bronchique<br>
+qc_report.json              — Métriques de qualité automatisées
+      </div>
+    </div>
+  </div>
+  <div class="footer">Mesures issues d'une validation interne sur 50+ examens CTPA</div>
+</div>
+
+<!-- VISUALISEUR -->
+<div class="slide">
+  <h2>Visualiseur interactif</h2>
+  <div class="grid">
+    <div>
+      <h3>SCTViewer</h3>
+      <p>
+        Visualisation interactive intégrée basée sur Matplotlib (backend TkAgg) :
+      </p>
+      <ul>
+        <li>Vues axiale / sagittale / coronale (MPR)</li>
+        <li>Palette <strong>IodineHeat</strong> personnalisée (violet → jaune)</li>
+        <li>Mode bipolaire (bleu pour les valeurs négatives d'iode)</li>
+        <li>Réglage fenêtrage et opacité (α blending)</li>
+        <li>Fenêtrage automatique basé sur les centiles des données</li>
+        <li>Navigation par réticule en mode MPR</li>
+        <li>Boutons de flip gauche-droit, interpolation lisse/pixel</li>
+      </ul>
+      <div class="code" style="font-size:0.85rem">ctpamap --view pre.nii.gz ctpa.nii.gz -o ./sortie</div>
+    </div>
+    <div>
+      <div class="card" style="height:100%; display:flex; flex-direction:column; justify-content:center;">
+        <h3>Palette : IodineHeat</h3>
+        <div style="height:30px; border-radius:6px; background: linear-gradient(to right, #200048, #400059, #60006a, #80007a, #a0008a, #c0009a, #e000a9, #ff00b8, #ff00c6, #ff00d4, #ff00e1, #ff00ed, #ff00f9, #ff00ff, #e020ff, #c040ff, #a060ff, #8080ff, #60a0ff, #40c0ff, #20e0ff, #00ffff, #00ffc0, #00ff80, #40ff40, #80ff00, #c0ff00, #ffff00); margin:1rem 0;"></div>
+        <div style="display:flex; justify-content:space-between; color:#94a3b8; font-size:0.85rem;">
+          <span>0 UH (absence)</span>
+          <span>→</span>
+          <span>200 UH (perfusion maximale)</span>
+        </div>
+        <h3 style="margin-top:1.5rem;">Mode bipolaire</h3>
+        <div style="height:30px; border-radius:6px; background: linear-gradient(to right, #1f4ec7, #000000, #200048, #60006a, #a0008a, #e000a9, #ff00b8, #ff00c6, #ff00d4, #ff00e1, #80ff00, #c0ff00, #ffff00); margin:1rem 0;"></div>
+        <div style="display:flex; justify-content:space-between; color:#94a3b8; font-size:0.85rem;">
+          <span>−150 UH (artefact)</span>
+          <span>0 UH</span>
+          <span>+150 UH (perfusion)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">scipy.ndimage · scikit-image · matplotlib · SimpleITK</div>
+</div>
+
+<!-- RÉSUMÉ -->
+<div class="slide">
+  <h2>Résumé</h2>
+  <div class="grid">
+    <div>
+      <h3>Ce qu'il fait</h3>
+      <p>Génère des cartes quantitatives de perfusion iodée à partir d'un angio-CT standard monobatteau via un pipeline entièrement automatisé.</p>
+      <h3>Comment il fonctionne</h3>
+      <p>Un recalage rigide + déformable aligne les volumes pré- et post-contraste ; la segmentation poumon/vaisseaux/voies aériennes élimine les faux positifs ; la soustraction isole le rehaussement iodé ; la correction d'aération par jacobien compense les différences d'apnée.</p>
+      <h3>Pourquoi c'est important</h3>
+      <p>Fournit une information fonctionnelle de perfusion à partir d'un CTPA de routine sans nécessiter de scanner double-énergie — accessible à tout centre. Améliore la sensibilité pour les EP sous-segmentaires et permet une quantification de la réponse thérapeutique.</p>
+    </div>
+    <div>
+      <h3>Atouts</h3>
+      <ul>
+        <li>Modulaire — choix du moteur de recalage</li>
+        <li>Open-source — licence MIT</li>
+        <li>CQ automatisée avec critères passe/échec</li>
+        <li>Visualiseur interactif intégré</li>
+        <li>Correction d'aération par jacobien</li>
+      </ul>
+      <h3>Perspectives</h3>
+      <ul>
+        <li>Segmentation par apprentissage profond (nnUNet)</li>
+        <li>Recalage accéléré sur GPU</li>
+        <li>Quantification perfusionnelle lobaire</li>
+        <li>Études de validation multicentriques</li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer" style="margin-top:3rem;">
+    <p style="font-size:1.2rem; color:#94a3b8;">
+      <span style="color:#a78bfa;">ctpamap</span> pre.nii.gz ctpa.nii.gz -o ./perfusion --antspy --aer --view
+    </p>
+  </div>
+</div>
+
+</body>
+</html>

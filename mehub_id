@@ -1,0 +1,8 @@
+{
+  "name": "CTPAMAP",
+  "description": "Lung subtraction CTPA perfusion mapper: registers a non-contrast chest CT to a contrast-enhanced CTPA, subtracts them, and produces an iodine/perfusion map. Python package + batch CLI + FastAPI backend + Electron/React desktop GUI with an embedded NIfTI viewer.",
+  "tags": [],
+  "stack": "auto",
+  "progress": "stable",
+  "version": "1.2"
+}

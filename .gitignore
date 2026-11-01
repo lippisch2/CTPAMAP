@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test caches
+.pytest_cache/
+.mypy_cache/
+
+# Outputs / scratch
+test_output/
+*.nii
+*.nii.gz
+qc_report.json
+out/
+
+# Backups
+*.bak
+
+# Virtualenvs / IDE
+.venv/
+venv/
+.idea/
+.vscode/
+
+# Electron build artifacts
+electron-app/node_modules/
+electron-app/dist/
+electron-app/dist-electron/
+
+# Slicer extension (maintained separately; excluded from this repo)
+SlicerCTPAMap/
+
+# Dev tooling
+.opencode/
+

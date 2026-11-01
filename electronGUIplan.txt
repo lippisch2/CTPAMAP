@@ -1,0 +1,194 @@
+================================================================================
+PLAN: CTPAMAP — Electron + React + FastAPI Desktop App
+================================================================================
+
+Saved: 2026-07-16
+Reference design: /temp/DIFFSUITE (same architecture) and /temp/MRQUANT/electronGUIplan.txt
+Target package: /temp/ctpamap  (ctpamap v1.0.0, src-layout, entry: ctpamap.cli:main)
+
+--------------------------------------------------------------------------------
+ARCHITECTURE (identical to DIFFSUITE / MRQUANT)
+--------------------------------------------------------------------------------
+Electron main spawns:
+    python -m uvicorn ctpamap.api:app --host 127.0.0.1 --port 18923
+polls /api/status until 200, then opens React renderer. Kills python on quit.
+React wizard <-> FastAPI over HTTP (CORS allow_origins=["*"]).
+Python logic stays inside the existing ctpamap package; GUI is a thin frontend.
+NO model logic moved to JS.
+
+  PYTHON (FastAPI backend, ctpamap/api.py)
+    - Endpoints per wizard step / action.
+    - Load endpoint: takes pre + ctpa paths, stores session in SESSIONS (uuid).
+    - Run endpoint: runs run_pipeline in BackgroundTasks; updates JOBS dict
+      (status, progress_pct, outputs, error).
+    - Progress endpoint polling every 500ms.
+    - /api/nifti?path=<abs> serves output NIfTI as octet-stream for the viewer.
+    - CORS enabled.
+
+  JS (Electron + React + TS)
+    - Wizard: 1 Inputs -> 2 Options -> 3 Run -> 4 Results. State lifted in App.tsx.
+    - Typed api/client.ts fetch wrapper.
+    - preload.ts exposes contextBridge: { openFileDialog, openExternalViewer, apiBase }.
+
+--------------------------------------------------------------------------------
+1. PYTHON BACKEND — ctpamap/api.py  (wrap existing run_pipeline)
+--------------------------------------------------------------------------------
+ctpamap already exposes a clean reusable function:
+
+    run_pipeline(pre_path, ctpa_path, out_dir,
+                 target_spacing=(1.5,1.5,1.5), skip_reg=False, aggressive=False,
+                 method="default", hd=False, lite=False, no_seg=False,
+                 do_aer=False, use_gpu=False, no_clip=False)
+
+The backend calls run_pipeline(...) with params from the GUI, storing outputs in
+a session out_dir. Because run_pipeline is monolithic (no yield), progress is
+reported in coarse stages; for real progress, add an OPTIONAL progress_callback
+argument to run_pipeline that is invoked at each print stage (load / reorient /
+resample / seg / register / iodine / qc). This is a minimal, safe addition that
+does not alter computation.
+
+  ENDPOINTS
+    GET  /api/status                       -> {ok, version, python}
+    POST /api/load   {pre, ctpa, out?}     -> session_id + metadata (shapes, spacing)
+    POST /api/run    {session_id, params}  -> job_id (BackgroundTasks)
+    GET  /api/run/{job_id}                 -> {status, progress_pct, outputs?, error?}
+    GET  /api/nifti?path=<abs>             -> FileResponse octet-stream
+
+  SESSIONS: session_id -> {pre, ctpa, out_dir, meta}
+  JOBS:    job_id    -> {status, progress_pct, outputs, error}
+
+  Outputs produced by run_pipeline (served via /api/nifti):
+    ctpa_regrid.nii.gz, registered_pre.nii.gz,
+    lung_mask.nii.gz, vessel_mask.nii.gz, airway_mask.nii.gz,
+    iodine_map_raw.nii.gz, iodine_map_clean.nii.gz, iodine_overlay.nii.gz,
+    qc_report.json
+
+--------------------------------------------------------------------------------
+2. OPTIONAL TAGS -> CHECKBOXES / TEXTBOXES  (from ctpamap/cli.py)
+--------------------------------------------------------------------------------
+  INPUTS (step 1)
+    pre   [file picker]  Non-contrast chest CT (pre) NIfTI
+    ctpa  [file picker]  Contrast-enhanced pulmonary CTA NIfTI
+    -o/--out          [textbox]  Output directory (default: input dir)
+    --spacing X Y Z   [3 textboxes] Target isotropic spacing mm (default 1.5 1.5 1.5)
+    --hd              [checkbox]  High-def: use finest native voxel spacing
+
+  REGISTRATION CONTROL (step 2)
+    --no-reg          [checkbox]  Skip registration; use common-grid pre directly
+    --agg / --agglite [checkbox x2]  Aggressive deformable / Aggressive lite (faster)
+    --noseg           [checkbox]  Skip vessel/airway segmentation
+    --aer             [checkbox]  Aeration correction via Jacobian
+    --no-aer          [checkbox]  Disable aeration correction (overrides --aer/--noseg)
+    --gpu             [checkbox]  FireANTs GPU + CuPy vesselness/Jacobian
+    --noclip          [checkbox]  Skip HU clip [-1000,1500]; raw values throughout
+
+  REGISTRATION METHOD (mutually exclusive — radio/select)
+    default | --vessel | --antspy | --stix
+      --vessel   [radio]  Vesselness-driven (recommended for subtraction CTPA)
+      --antspy   [radio]  ANTsPy SyN (pip install antspyx)
+      --stix     [radio]  ITK-Elastix (pip install itk-elastix)
+
+  VIEWING
+    -v / --view         [checkbox]  Launch matplotlib SCT viewer on results
+    --view-n           [checkbox]  Launch napari GPU viewer (pip install ctpamap[napari])
+    (Open Externally buttons in ResultsPanel can spawn these viewers too)
+
+  Helper mapping: {agg, agglite} -> aggressive; agglite -> lite; noseg or aer ->
+  do_aer unless no_aer. The OptionsStep form encodes these dependencies so the
+  GUI computes the same kwargs run_pipeline expects.
+
+--------------------------------------------------------------------------------
+3. ELECTRON APP — ctpamap/electron-app/  (copy DIFFSUITE scaffold, rename)
+--------------------------------------------------------------------------------
+  electron-app/
+    package.json          # name ctpamap-electron, main dist-electron/main/main.js
+    electron.vite.config.ts
+    electron/main.ts      # spawn uvicorn ctpamap.api:app --port 18923, poll, IPC
+    electron/preload.ts   # contextBridge -> window.ctpamap
+    electron-builder.yml  # win: nsis; appId com.ctpamap.app; productName CTPAMAP
+    index.html
+    src/
+      main.tsx
+      App.tsx             # stepper: 1 Inputs -> 2 Options -> 3 Run -> 4 Results
+      api/client.ts
+      types/index.ts
+      styles/global.css
+      components/
+        ErrorBoundary.tsx
+        InputStep.tsx       # pre + ctpa pickers (+ out dir + spacing)
+        OptionsStep.tsx     # checkbox + textbox form from typed options schema
+        RunStep.tsx         # progress bar polling /api/run/{job_id}
+        ResultsPanel.tsx    # output map list + NiftiViewer + Open Externally
+        NiftiViewer.tsx     # canvas viewer (reused from DIFFSUITE)
+
+  scripts: dev / build / build:win (electron-vite build && electron-builder --win)
+
+  PINNED VERSIONS (do not change — vite@6 breaks SSR build):
+    electron-vite@^2.3.0, vite@^5.4.0, @vitejs/plugin-react@^4.3.4,
+    electron@^33.2.0, electron-builder@^25.1.8, typescript@^5.7.2,
+    react@^19.0.0, react-dom@^19.0.0, zustand@^5.0.2,
+    nifti-reader-js@^0.6.8, node-fetch@^2.7.0
+
+  electron.vite.config.ts KEY POINTS (same as DIFFSUITE):
+    - MUST be named electron.vite.config.ts
+    - main outDir dist-electron/main (fileName main.js); preload dist-electron/preload
+    - renderer outDir dist-electron/renderer, emptyOutDir:false
+    - main.ts references ../preload/preload.js and ../renderer/index.html
+
+--------------------------------------------------------------------------------
+4. REACT WIZARD
+--------------------------------------------------------------------------------
+  App.tsx stepper (4 steps):
+    1 Inputs   -> InputStep (pre, ctpa, out dir, spacing x3)
+    2 Options  -> OptionsStep (checkboxes + textboxes + method radio, from schema)
+    3 Run      -> RunStep (progress bar, polls /api/run/{job_id} every 500ms)
+    4 Results  -> ResultsPanel (output map list, NiftiViewer per map, Open Externally)
+
+  OptionsStep renders each option from a typed schema:
+    {type: checkbox|number|text|radio, label, default, unit, dependsOn, group}
+    group -> "Registration control" / "Registration method" / "Viewing".
+    Mutually-exclusive method rendered as radio; checkboxes toggle dependent boxes.
+
+  NiftiViewer.tsx (reused):
+    - import * as nifti from "nifti-reader-js"  (ESM, never require)
+    - fetch -> arrayBuffer() -> RAW ArrayBuffer to isNIFTI/readHeader/readImage
+    - gzip: if isCompressed(buf) -> decompress(buf) first
+    - readImage(header, data) needs TWO args
+    - colormaps gray/turbo/jet, slice slider, stats + histogram
+
+--------------------------------------------------------------------------------
+5. AGENTS.md
+--------------------------------------------------------------------------------
+  Add CTPAMAP structure, FastAPI endpoints, pinned versions, build pitfalls
+  (mirroring DIFFSUITE AGENTS.md). Python model logic unchanged except the
+  optional progress_callback added to run_pipeline (print-stage hooks only).
+
+--------------------------------------------------------------------------------
+6. VERIFICATION CHECKLIST
+--------------------------------------------------------------------------------
+  cd ctpamap/electron-app
+  npm install
+  npm run build:win      # -> dist-electron/dist/CTPAMAP-<version>-setup.exe (NSIS)
+
+  - Launch exe; confirm /api/status 200 (backend spawned).
+  - API drive: load(pre,ctpa) -> run(params) -> poll to progress_pct=100 ->
+    fetch an output via /api/nifti (200).
+  - Click through wizard; confirm NIfTI viewer renders, ErrorBoundary present.
+  - Test data: /temp/ctpamap/test_output has sample outputs; supply your own
+    pre + ctpa NIfTI for a full run.
+
+--------------------------------------------------------------------------------
+KEY PITFALLS (honor these)
+--------------------------------------------------------------------------------
+  - electron-vite config file MUST be electron.vite.config.ts (not vite.config.ts).
+  - Pin electron-vite@2 + vite@5 + @vitejs/plugin-react@4 (vite@6 breaks SSR build).
+  - main/preload output dirs must match package.json "main" (dist-electron/main/main.js).
+  - emptyOutDir:false on renderer or it deletes main/preload outputs.
+  - rcedit "Unable to commit changes": a previous CTPAMAP.exe still running -> kill it.
+  - BackgroundTasks progress: pass a real callback (print-stage hooks), no monkeypatch.
+  - CORS enabled or renderer cross-origin fetches blocked.
+  - NIfTI viewer: ESM import; pass ArrayBuffer (not TypedArray); handle gzip;
+    readImage needs (header, data).
+  - Wrap React tree in ErrorBoundary.
+  - If pip-installed as editable (`pip install -e .`), uvicorn ctpamap.api:app works
+    from any cwd; otherwise run electron main with cwd = /temp/ctpamap.

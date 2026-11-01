@@ -1,0 +1,15 @@
+# Core dependencies (kept in sync with [project].dependencies in pyproject.toml).
+# Edit pyproject.toml first and mirror here if you change versions.
+numpy>=1.24
+nibabel>=5.0
+SimpleITK>=2.1
+scipy>=1.10
+matplotlib>=3.7
+scikit-image>=0.21
+
+# Optional backends (install one if you want faster/better registration)
+# pip install antspyx      — ANTsPy registration (recommended)
+# pip install itk-elastix  — ITK-Elastix registration
+
+# Dev / testing
+# pip install pytest

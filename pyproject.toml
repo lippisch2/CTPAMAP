@@ -1,0 +1,35 @@
+[project]
+name = "ctpamap"
+version = "1.2.0"
+description = "Lung subtraction CTPA perfusion mapper"
+requires-python = ">=3.10"
+dependencies = [
+    "nibabel>=5.0",
+    "SimpleITK>=2.1",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "scikit-image>=0.21",
+]
+
+[tool.setuptools.packages.find]
+include = ["ctpamap", "ctpamap.*"]
+exclude = ["test_output*", "tests*"]
+
+[tool.setuptools.package-data]
+ctpamap = ["IodineHeat256.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+ctpamap = "ctpamap.cli:main"
+ctpamap-viewern = "ctpamap.sctviewern:main"
+
+[project.optional-dependencies]
+antspy = ["antspyx"]
+elastix = ["itk-elastix"]
+napari = ["napari[pyqt6]"]
+gpu = ["cupy-cuda12x"]
+fireants = ["fireants"]
+dev = ["pytest"]
